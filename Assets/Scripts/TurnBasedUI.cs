@@ -8,7 +8,11 @@ public class TurnBasedUI : MonoBehaviour
     [Header("UI Elements")]
     public TextMeshProUGUI turnInfoText;
     public TextMeshProUGUI movementPointsText;
+    public TextMeshProUGUI actionPointsText;
+    public TextMeshProUGUI healthText;
     public TextMeshProUGUI instructionsText;
+    public TextMeshProUGUI availableActionsText;
+    public TextMeshProUGUI actionModeText;
     public Transform characterListParent; // Parent for character status UI elements
     
     [Header("Character Status Prefabs")]
@@ -26,6 +30,11 @@ public class TurnBasedUI : MonoBehaviour
     public Color selectedCharacterColor = Color.green;
     public Color unselectedCharacterColor = Color.white;
     public Color noMovementsColor = Color.red;
+    public Color noActionsColor = Color.yellow;
+    public Color deadCharacterColor = Color.gray;
+    public Color lowHealthColor = Color.red;
+    public Color mediumHealthColor = Color.yellow;
+    public Color highHealthColor = Color.green;
     
     private TurnManager turnManager;
     private List<CharacterStatusDisplay> characterStatusDisplays = new List<CharacterStatusDisplay>();
@@ -37,7 +46,10 @@ public class TurnBasedUI : MonoBehaviour
         public GameObject statusObject;
         public TextMeshProUGUI nameText;
         public TextMeshProUGUI movementText;
+        public TextMeshProUGUI actionText;
+        public TextMeshProUGUI healthText;
         public Image backgroundImage;
+        public Image healthBar;
     }
     
     private void Start()
@@ -50,6 +62,8 @@ public class TurnBasedUI : MonoBehaviour
             turnManager.OnTurnStart += OnCharacterTurnStart;
             turnManager.OnTurnEnd += OnCharacterTurnEnd;
             turnManager.OnPhaseChange += OnPhaseChange;
+            turnManager.OnAvailableActionsChanged += OnAvailableActionsChanged;
+            turnManager.OnActionModeChanged += OnActionModeChanged;
             
             // Create character status displays
             CreateCharacterStatusDisplays();
@@ -96,29 +110,26 @@ public class TurnBasedUI : MonoBehaviour
         }
         else
         {
-            // Create a simple default UI element
+            // Create a more detailed default UI element
             statusObj = new GameObject($"Character_{index}_Status");
             statusObj.transform.SetParent(characterListParent);
+            
+            // Add RectTransform component
+            var rectTransform = statusObj.AddComponent<RectTransform>();
+            rectTransform.sizeDelta = new Vector2(200, 80);
             
             // Add background image
             var bgImage = statusObj.AddComponent<Image>();
             bgImage.color = unselectedCharacterColor;
             
-            // Add TextMeshPro for character name and movement points
-            var textObj = new GameObject("Text");
-            textObj.transform.SetParent(statusObj.transform);
-            var text = textObj.AddComponent<TextMeshProUGUI>();
-            text.font = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
-            text.fontSize = 14;
-            text.color = Color.black;
-            text.alignment = TextAlignmentOptions.Center;
+            // Create text elements
+            CreateTextElement(statusObj, "NameText", new Vector2(0, 30), 14, TextAlignmentOptions.Center);
+            CreateTextElement(statusObj, "MovementText", new Vector2(-50, 10), 12, TextAlignmentOptions.Center);
+            CreateTextElement(statusObj, "ActionText", new Vector2(50, 10), 12, TextAlignmentOptions.Center);
+            CreateTextElement(statusObj, "HealthText", new Vector2(0, -10), 10, TextAlignmentOptions.Center);
             
-            // Set RectTransform
-            var rectTransform = textObj.GetComponent<RectTransform>();
-            rectTransform.anchorMin = Vector2.zero;
-            rectTransform.anchorMax = Vector2.one;
-            rectTransform.offsetMin = Vector2.zero;
-            rectTransform.offsetMax = Vector2.zero;
+            // Create health bar
+            CreateHealthBar(statusObj);
         }
         
         // Setup the display
@@ -126,18 +137,73 @@ public class TurnBasedUI : MonoBehaviour
         {
             character = character,
             statusObject = statusObj,
-            nameText = statusObj.GetComponentInChildren<TextMeshProUGUI>(),
             backgroundImage = statusObj.GetComponent<Image>()
         };
         
-        // Look for additional TextMeshPro components if using a prefab
+        // Get text components
         var textComponents = statusObj.GetComponentsInChildren<TextMeshProUGUI>();
-        if (textComponents.Length > 1)
+        foreach (var text in textComponents)
         {
-            display.movementText = textComponents[1];
+            switch (text.name)
+            {
+                case "NameText":
+                    display.nameText = text;
+                    break;
+                case "MovementText":
+                    display.movementText = text;
+                    break;
+                case "ActionText":
+                    display.actionText = text;
+                    break;
+                case "HealthText":
+                    display.healthText = text;
+                    break;
+            }
+        }
+        
+        // Get health bar
+        var healthBarTransform = statusObj.transform.Find("HealthBar");
+        if (healthBarTransform != null)
+        {
+            display.healthBar = healthBarTransform.GetComponent<Image>();
         }
         
         characterStatusDisplays.Add(display);
+    }
+    
+    private void CreateTextElement(GameObject parent, string name, Vector2 position, int fontSize, TextAlignmentOptions alignment)
+    {
+        var textObj = new GameObject(name);
+        textObj.transform.SetParent(parent.transform);
+        
+        var rectTransform = textObj.AddComponent<RectTransform>();
+        rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        rectTransform.anchoredPosition = position;
+        rectTransform.sizeDelta = new Vector2(90, 20);
+        
+        var text = textObj.AddComponent<TextMeshProUGUI>();
+        text.font = Resources.Load<TMP_FontAsset>("Fonts & Materials/LiberationSans SDF");
+        text.fontSize = fontSize;
+        text.color = Color.black;
+        text.alignment = alignment;
+    }
+    
+    private void CreateHealthBar(GameObject parent)
+    {
+        var healthBarObj = new GameObject("HealthBar");
+        healthBarObj.transform.SetParent(parent.transform);
+        
+        var rectTransform = healthBarObj.AddComponent<RectTransform>();
+        rectTransform.anchorMin = new Vector2(0.1f, 0.1f);
+        rectTransform.anchorMax = new Vector2(0.9f, 0.2f);
+        rectTransform.offsetMin = Vector2.zero;
+        rectTransform.offsetMax = Vector2.zero;
+        
+        var image = healthBarObj.AddComponent<Image>();
+        image.color = highHealthColor;
+        image.type = Image.Type.Filled;
+        image.fillMethod = Image.FillMethod.Horizontal;
     }
     
     private GameObject GetUIPrefabForCharacter(Character character)
@@ -170,12 +236,55 @@ public class TurnBasedUI : MonoBehaviour
         {
             string phaseText = turnManager.IsPlayerTurn() ? "Player Turn" : "Enemy Turn";
             string characterText = currentCharacter != null ? $" - {currentCharacter.characterName}" : "";
-            turnInfoText.text = phaseText + characterText;
+            string modeText = turnManager.IsInActionMode() ? " (Action Mode)" : " (Movement Mode)";
+            turnInfoText.text = phaseText + characterText + modeText;
         }
         
-        if (movementPointsText != null && currentCharacter != null)
+        if (currentCharacter != null)
         {
-            movementPointsText.text = $"Movements: {currentCharacter.GetCurrentMovementPoints()}/{currentCharacter.GetMaxMovementPoints()}";
+            // Update movement points
+            if (movementPointsText != null)
+            {
+                movementPointsText.text = $"Movement: {currentCharacter.GetCurrentMovementPoints()}/{currentCharacter.GetMaxMovementPoints()}";
+            }
+            
+            // Update action points
+            if (actionPointsText != null)
+            {
+                var stats = currentCharacter.GetCharacterStats();
+                actionPointsText.text = $"Actions: {stats.currentActionPoints}/{stats.maxActionPoints}";
+            }
+            
+            // Update health
+            if (healthText != null)
+            {
+                var stats = currentCharacter.GetCharacterStats();
+                healthText.text = $"Health: {stats.currentHealth}/{stats.maxHealth}";
+                
+                // Color health text based on health percentage
+                float healthPercentage = stats.GetHealthPercentage();
+                if (healthPercentage > 0.6f)
+                    healthText.color = highHealthColor;
+                else if (healthPercentage > 0.3f)
+                    healthText.color = mediumHealthColor;
+                else
+                    healthText.color = lowHealthColor;
+            }
+        }
+        
+        // Update action mode text
+        if (actionModeText != null)
+        {
+            if (turnManager.IsInActionMode())
+            {
+                actionModeText.text = "ACTION MODE - Select action with number keys";
+                actionModeText.color = Color.cyan;
+            }
+            else
+            {
+                actionModeText.text = "MOVEMENT MODE - Press Q for actions";
+                actionModeText.color = Color.white;
+            }
         }
         
         // Update character status displays
@@ -190,22 +299,46 @@ public class TurnBasedUI : MonoBehaviour
         {
             if (display.character == null || display.statusObject == null) continue;
             
+            var character = display.character;
+            var stats = character.GetCharacterStats();
+            
             // Update name text
             if (display.nameText != null)
             {
-                string text = display.character.characterName;
-                if (display.movementText == null)
-                {
-                    // Include movement points in main text if no separate movement text
-                    text += $"\n{display.character.GetCurrentMovementPoints()}/{display.character.GetMaxMovementPoints()}";
-                }
-                display.nameText.text = text;
+                display.nameText.text = $"{character.characterName} ({character.GetCharacterType()})";
             }
             
-            // Update movement text if separate
+            // Update movement text
             if (display.movementText != null)
             {
-                display.movementText.text = $"{display.character.GetCurrentMovementPoints()}/{display.character.GetMaxMovementPoints()}";
+                display.movementText.text = $"Move: {character.GetCurrentMovementPoints()}/{character.GetMaxMovementPoints()}";
+            }
+            
+            // Update action text
+            if (display.actionText != null)
+            {
+                display.actionText.text = $"Act: {stats.currentActionPoints}/{stats.maxActionPoints}";
+            }
+            
+            // Update health text
+            if (display.healthText != null)
+            {
+                display.healthText.text = $"HP: {stats.currentHealth}/{stats.maxHealth}";
+            }
+            
+            // Update health bar
+            if (display.healthBar != null)
+            {
+                float healthPercentage = stats.GetHealthPercentage();
+                display.healthBar.fillAmount = healthPercentage;
+                
+                // Color health bar based on health percentage
+                if (healthPercentage > 0.6f)
+                    display.healthBar.color = highHealthColor;
+                else if (healthPercentage > 0.3f)
+                    display.healthBar.color = mediumHealthColor;
+                else
+                    display.healthBar.color = lowHealthColor;
             }
             
             // Update background color based on status
@@ -213,13 +346,21 @@ public class TurnBasedUI : MonoBehaviour
             {
                 Color targetColor;
                 
-                if (display.character == currentCharacter)
+                if (!character.IsAlive())
+                {
+                    targetColor = deadCharacterColor;
+                }
+                else if (character == currentCharacter)
                 {
                     targetColor = selectedCharacterColor;
                 }
-                else if (!display.character.HasMovementPointsLeft())
+                else if (!character.HasMovementPointsLeft() && !character.HasActionPointsLeft())
                 {
                     targetColor = noMovementsColor;
+                }
+                else if (!character.HasActionPointsLeft())
+                {
+                    targetColor = noActionsColor;
                 }
                 else
                 {
@@ -237,6 +378,9 @@ public class TurnBasedUI : MonoBehaviour
         {
             instructionsText.text = "Controls:\n" +
                                   "WASD - Move selected character\n" +
+                                  "Q - Toggle Action Mode\n" +
+                                  "1-9 - Select action/target (in Action Mode)\n" +
+                                  "ESC - Exit Action Mode\n" +
                                   "Tab - Switch between characters\n" +
                                   "Space - End current character's turn\n" +
                                   "Enter - End current phase";
@@ -259,6 +403,35 @@ public class TurnBasedUI : MonoBehaviour
         // Phase changed - UI will update automatically
     }
     
+    private void OnAvailableActionsChanged(Character character, List<BaseAction> availableActions)
+    {
+        if (availableActionsText != null)
+        {
+            if (availableActions.Count == 0)
+            {
+                availableActionsText.text = "No actions available";
+            }
+            else
+            {
+                string actionText = "Available Actions:\n";
+                for (int i = 0; i < availableActions.Count; i++)
+                {
+                    var action = availableActions[i];
+                    actionText += $"{i + 1}. {action.actionName} (Cost: {action.actionPointCost})\n";
+                }
+                availableActionsText.text = actionText;
+            }
+        }
+    }
+    
+    private void OnActionModeChanged(bool isInActionMode)
+    {
+        if (availableActionsText != null)
+        {
+            availableActionsText.gameObject.SetActive(isInActionMode);
+        }
+    }
+    
     private void OnDestroy()
     {
         if (turnManager != null)
@@ -266,6 +439,8 @@ public class TurnBasedUI : MonoBehaviour
             turnManager.OnTurnStart -= OnCharacterTurnStart;
             turnManager.OnTurnEnd -= OnCharacterTurnEnd;
             turnManager.OnPhaseChange -= OnPhaseChange;
+            turnManager.OnAvailableActionsChanged -= OnAvailableActionsChanged;
+            turnManager.OnActionModeChanged -= OnActionModeChanged;
         }
     }
 } 

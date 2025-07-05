@@ -5,6 +5,10 @@ public class Character : MonoBehaviour
     [Header("Character Info")]
     public string characterName = "Character";
     public bool isPlayerControlled = true;
+    public CharacterType characterType = CharacterType.Fighter;
+    
+    [Header("Character Stats")]
+    public CharacterStats characterStats;
     
     [Header("Movement Settings")]
     public float moveSpeed = 5f;
@@ -19,6 +23,7 @@ public class Character : MonoBehaviour
     
     [Header("Visual Feedback")]
     public GameObject selectionIndicator; // Visual indicator when this character is selected
+    public GameObject healthBar; // Optional health bar UI
     
     private int currentX;
     private int currentY;
@@ -31,9 +36,24 @@ public class Character : MonoBehaviour
     // Events for turn management
     public System.Action<Character> OnMovementComplete;
     public System.Action<Character> OnMovementPointsExhausted;
+    public System.Action<Character> OnActionPointsExhausted;
+    public System.Action<Character> OnCharacterDefeated;
+    public System.Action<BaseAction, Character> OnActionPerformed;
     
     private void Start()
     {
+        InitializeCharacter();
+    }
+    
+    private void InitializeCharacter()
+    {
+        // Initialize stats based on character type
+        if (characterStats == null)
+        {
+            var config = new CharacterTypeConfig(characterType);
+            characterStats = config.baseStats;
+        }
+        
         if (gridManager == null)
             gridManager = FindObjectOfType<GridManager>();
      
@@ -52,6 +72,9 @@ public class Character : MonoBehaviour
         {
             selectionIndicator.SetActive(false);
         }
+        
+        // Initialize health bar if present
+        UpdateHealthBar();
     }
     
     private void Update()
@@ -62,11 +85,33 @@ public class Character : MonoBehaviour
         {
             MoveToTarget();
         }
+        
+        UpdateHealthBar();
+    }
+    
+    private void UpdateHealthBar()
+    {
+        if (healthBar != null)
+        {
+            // Update health bar visibility and scale based on current health
+            healthBar.SetActive(characterStats.currentHealth < characterStats.maxHealth);
+            
+            // Scale the health bar based on health percentage
+            float healthPercentage = characterStats.GetHealthPercentage();
+            Vector3 scale = healthBar.transform.localScale;
+            scale.x = healthPercentage;
+            healthBar.transform.localScale = scale;
+        }
     }
     
     public bool CanMove()
     {
-        return !isMoving && currentMovementPoints > 0 && isSelected;
+        return !isMoving && currentMovementPoints > 0 && isSelected && characterStats.IsAlive();
+    }
+    
+    public bool CanPerformActions()
+    {
+        return !isMoving && characterStats.HasActionPoints() && isSelected && characterStats.IsAlive();
     }
     
     public bool TryMove(Vector2Int direction)
@@ -98,6 +143,16 @@ public class Character : MonoBehaviour
         }
         
         return false;
+    }
+    
+    public bool TryPerformAction(string actionName, Character target = null)
+    {
+        if (!CanPerformActions()) return false;
+        
+        ActionManager actionManager = ActionManager.Instance;
+        if (actionManager == null) return false;
+        
+        return actionManager.PerformAction(this, actionName, target);
     }
     
     private void UseMovementPoint()
@@ -194,7 +249,24 @@ public class Character : MonoBehaviour
     
     public void StartTurn()
     {
+        // Safety check: ensure character stats are properly initialized
+        if (characterStats == null)
+        {
+            Debug.LogWarning($"Character {characterName} has null stats! Initializing...");
+            var config = new CharacterTypeConfig(characterType);
+            characterStats = config.baseStats;
+        }
+        
+        // Additional safety check: ensure stats have valid values
+        if (characterStats.maxActionPoints <= 0)
+        {
+            Debug.LogWarning($"Character {characterName} has invalid maxActionPoints: {characterStats.maxActionPoints}! Reinitializing...");
+            var config = new CharacterTypeConfig(characterType);
+            characterStats = config.baseStats;
+        }
+        
         currentMovementPoints = maxMovementPoints;
+        characterStats.ResetForNewTurn();
         SetSelected(true);
     }
     
@@ -202,6 +274,40 @@ public class Character : MonoBehaviour
     {
         SetSelected(false);
         currentMovementPoints = 0;
+        // Don't reset action points here - they persist until start of next turn
+    }
+    
+    public void HandleCharacterDefeated()
+    {
+        Debug.Log($"{characterName} has been defeated!");
+        SetSelected(false);
+        
+        // Disable character visually but keep for potential revival
+        if (selectionIndicator != null)
+            selectionIndicator.SetActive(false);
+        
+        // Make character semi-transparent
+        var spriteRenderer = GetComponent<SpriteRenderer>();
+        if (spriteRenderer != null)
+        {
+            Color color = spriteRenderer.color;
+            color.a = 0.5f;
+            spriteRenderer.color = color;
+        }
+        
+        OnCharacterDefeated?.Invoke(this);
+    }
+    
+    public void HandleActionPerformed(BaseAction action, Character target)
+    {
+        Debug.Log($"{characterName} performed {action.actionName}" + (target != null ? $" on {target.characterName}" : ""));
+        
+        if (!characterStats.HasActionPoints())
+        {
+            OnActionPointsExhausted?.Invoke(this);
+        }
+        
+        OnActionPerformed?.Invoke(action, target);
     }
     
     // Getters
@@ -233,5 +339,30 @@ public class Character : MonoBehaviour
     public bool HasMovementPointsLeft()
     {
         return currentMovementPoints > 0;
+    }
+    
+    public bool HasActionPointsLeft()
+    {
+        return characterStats.HasActionPoints();
+    }
+    
+    public bool HasAnyPointsLeft()
+    {
+        return HasMovementPointsLeft() || HasActionPointsLeft();
+    }
+    
+    public CharacterType GetCharacterType()
+    {
+        return characterType;
+    }
+    
+    public CharacterStats GetCharacterStats()
+    {
+        return characterStats;
+    }
+    
+    public bool IsAlive()
+    {
+        return characterStats.IsAlive();
     }
 } 
